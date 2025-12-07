@@ -1,11 +1,14 @@
 import os
 import json
+import logging
 from typing import List, Dict, Any
 from openai import OpenAI
 from tools import (
     roll_dice, get_room_details, get_character_data, update_character_data, 
     rules_lookup, get_monster_stats, move_character
 )
+
+logger = logging.getLogger(__name__)
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -154,15 +157,20 @@ def process_player_action(player_input: str, character_name: str, session_histor
     
     messages.append({"role": "user", "content": context_message})
 
+    logger.info(f"Processing action for {character_name}: {player_input}")
+
     # 2. LLM Call
     try:
+        logger.info("Sending request to LLM...")
         response = client.chat.completions.create(
             model=MODEL_NAME,
             messages=messages,
             tools=TOOLS,
             tool_choice="auto"
         )
+        logger.info("Received response from LLM.")
     except Exception as e:
+        logger.error(f"LLM Error: {e}")
         return {"narration": "Error connecting to AI brain.", "out_of_character": str(e)}
 
     response_message = response.choices[0].message
@@ -170,24 +178,30 @@ def process_player_action(player_input: str, character_name: str, session_histor
 
     # 3. Handle Tool Calls
     if tool_calls:
+        logger.info(f"LLM requested {len(tool_calls)} tools.")
         messages.append(response_message)
         
         for tool_call in tool_calls:
             function_name = tool_call.function.name
             function_args = json.loads(tool_call.function.arguments)
+            logger.info(f"Executing tool: {function_name} with args {function_args}")
             
             tool_result = "{}"
             
-            if function_name == "roll_dice":
-                tool_result = json.dumps(roll_dice(**function_args))
-            elif function_name == "get_room_details":
-                tool_result = json.dumps(get_room_details(**function_args))
-            elif function_name == "rules_lookup":
-                tool_result = json.dumps(rules_lookup(**function_args))
-            elif function_name == "update_character_data":
-                tool_result = json.dumps(update_character_data(**function_args))
-            elif function_name == "move_character":
-                tool_result = json.dumps(move_character(**function_args))
+            try:
+                if function_name == "roll_dice":
+                    tool_result = json.dumps(roll_dice(**function_args))
+                elif function_name == "get_room_details":
+                    tool_result = json.dumps(get_room_details(**function_args))
+                elif function_name == "rules_lookup":
+                    tool_result = json.dumps(rules_lookup(**function_args))
+                elif function_name == "update_character_data":
+                    tool_result = json.dumps(update_character_data(**function_args))
+                elif function_name == "move_character":
+                    tool_result = json.dumps(move_character(**function_args))
+            except Exception as e:
+                logger.error(f"Tool execution failed: {e}")
+                tool_result = json.dumps({"error": str(e)})
 
             messages.append({
                 "role": "tool",
@@ -197,14 +211,22 @@ def process_player_action(player_input: str, character_name: str, session_histor
             })
         
         # 4. Final Response after tools
-        final_response = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=messages,
-            response_format={ "type": "json_object" } # Ensure JSON output
-        )
-        final_content = final_response.choices[0].message.content
+        logger.info("Sending follow-up request to LLM with tool outputs...")
+        try:
+            final_response = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=messages,
+                response_format={ "type": "json_object" } # Ensure JSON output
+            )
+            final_content = final_response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"LLM Follow-up Error: {e}")
+            return {"narration": "The DM struggles to describe the outcome.", "out_of_character": f"Follow-up Error: {str(e)}"}
     else:
+        logger.info("No tools called. Using direct response.")
         final_content = response_message.content
+
+    logger.info(f"Final LLM content: {final_content}")
 
     # Parse JSON output
     try:
@@ -212,5 +234,6 @@ def process_player_action(player_input: str, character_name: str, session_histor
              return {"narration": "The DM is silent."}
         return json.loads(final_content)
     except json.JSONDecodeError:
+        logger.warning("Failed to parse JSON from LLM. Returning raw content.")
         # Fallback if model fails to output JSON despite instructions
         return {"narration": final_content, "out_of_character": "Model output raw text."}

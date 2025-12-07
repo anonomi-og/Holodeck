@@ -4,10 +4,24 @@ import os
 # Add current directory to path so imports work when run from root
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from fastapi import FastAPI, HTTPException
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger("api")
+
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
+import traceback
+
 from agent import process_player_action
 from tools import get_character_data, get_room_details, execute_query
 
@@ -34,11 +48,18 @@ class ChatResponse(BaseModel):
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    response_data = process_player_action(
-        request.message, 
-        request.character_name, 
-        request.session_history
-    )
+    logger.info(f"Chat request received from {request.character_name}: {request.message}")
+    try:
+        response_data = process_player_action(
+            request.message, 
+            request.character_name, 
+            request.session_history
+        )
+        logger.info("Agent processing complete.")
+    except Exception as e:
+        logger.error(f"Error in chat processing: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
     
     # Get fresh state to return
     state = get_character_data(request.character_name)

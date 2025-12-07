@@ -11,6 +11,10 @@ export async function sendMessage(message, characterName, session_history) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message, character_name: characterName, session_history })
     });
+    if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || `Request failed with status ${res.status}`);
+    }
     return res.json();
 }
 
