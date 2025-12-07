@@ -1,0 +1,19 @@
+# Environment Variables
+.env
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.pytest_cache/
+
+# Database
+*.db
+!im_dungeon.db
+
+# System
+.DS_Store
+Thumbs.db
+
+# Node (if applicable in future)
+node_modules/
